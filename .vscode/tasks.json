@@ -24,7 +24,7 @@
         {
             "label": "launch",
             "type": "shell",
-            "command": "${env:FUSEE_LAUNCHER} \"${workspaceFolder}/out/memloader.bin\"",
+            "command": "${env:FUSEE_LAUNCHER} \"${workspaceFolder}/out/gptrestore.bin\"",
             "dependsOn": [
 				"compile"
             ],
