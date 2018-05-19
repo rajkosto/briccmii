@@ -998,11 +998,6 @@ static void _sdram_config(const struct sdram_params *param)
 	sdram_lock_carveouts(param, mc);
 }
 
-static u32 _get_sdram_id()
-{
-	return (fuse_read_odm(4) & 0x38) >> 3;
-}
-
 #ifdef GET_SDRAM_FROM_BOOT0
 #include "mc.h"
 #include "sdmmc.h"
@@ -1016,7 +1011,7 @@ static u32 _get_sdram_id()
 const struct sdram_params* sdram_get_params()
 {
 	void* retVal = NULL;
-	u32 board_sdram_id = _get_sdram_id(); //TODO: sdram_id should be in [0,4].
+	u32 board_sdram_id = fuse_get_dram_id(); //TODO: sdram_id should be in [0,4].
 	if (board_sdram_id >= 4)
 	{
 		dbg_print("ERROR: fuse-read board_sdram_id is %u (valid values 0..4)\n", board_sdram_id);

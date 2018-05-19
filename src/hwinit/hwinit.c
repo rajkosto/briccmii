@@ -150,9 +150,9 @@ void config_hw()
 	clock_enable_se();
 
 	//Enable fuse clock.
-	clock_enable_fuse(1);
+	fuse_make_regs_visible();
 	//Disable fuse programming.
-	fuse_disable_program();
+	fuse_disable_programming();
 
 	mc_enable();
 
