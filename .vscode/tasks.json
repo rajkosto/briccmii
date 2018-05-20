@@ -24,7 +24,7 @@
         {
             "label": "launch",
             "type": "shell",
-            "command": "${env:FUSEE_LAUNCHER} \"${workspaceFolder}/out/gptrestore.bin\"",
+            "command": "${env:FUSEE_LAUNCHER} \"${workspaceFolder}/out/briccmii.bin\"",
             "dependsOn": [
 				"compile"
             ],
