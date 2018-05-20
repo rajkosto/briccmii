@@ -19,8 +19,7 @@
 
 #define NULL ((void *)0)
 
-#define ALIGN(x, a) (((x) + (a) - 1) & ~((a) - 1))
-#define ALIGN_UP(x,a)   ALIGN((x),(a))
+#define ALIGN_UP(x, a) (((x) + (a) - 1) & ~((a) - 1))
 #define ALIGN_DOWN(x,a) ((x) & ~((typeof(x))(a)-1UL))
 #define IS_ALIGNED(x,a) (((x) & ((typeof(x))(a)-1UL)) == 0)
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -36,6 +35,12 @@
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
+
+#define ALIGNED(m)        __attribute__((aligned(m)))
+#define PACKED          __attribute__((packed))
+
+#define ALINLINE        __attribute__((always_inline))
+#define NOINLINE        __attribute__((noinline))
 
 typedef unsigned char u8;
 typedef unsigned short u16;

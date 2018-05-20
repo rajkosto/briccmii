@@ -42,7 +42,7 @@ static u32 _heap_alloc(heap_t *heap, u32 size)
 	hnode_t *node, *new;
 	int search = 1;
 
-	size = ALIGN(size, 0x10);
+	size = ALIGN_UP(size, 0x10);
 
 	if (!heap->first)
 	{
