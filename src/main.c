@@ -263,7 +263,10 @@ int main(void)
                             continue;
                         }
                         else
-                            printk("cust_data corrected");
+                        {
+                            printk("cust_data corrected\n");
+                            continue;
+                        }
                     }
                     else
                     {
@@ -274,18 +277,17 @@ int main(void)
                 if (!pubkeyCorrect)
                 {
                     memcpy(&bctEntryData[0x210], goodPubkey, sizeof(goodPubkey));
-                    if (!custDataCorrect)
-                        printk(", ");
-
                     if (!sdmmc_storage_write(&storage, currEntry*BCT_ENTRY_SIZE_SECTORS+1, 1, &bctEntryData[SECTOR_SIZE]))
                     {
                         printk("Error writing pubkey to BOOT0!\n");
                         continue;
                     }
                     else
-                        printk("GOT UN-BRICC'D!");
+                    {
+                        printk("GOT UN-BRICC'D!\n");
+                        continue;
+                    }
                 }
-                printk("\n");
             }
             break;
         } 
