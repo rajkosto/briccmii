@@ -21,7 +21,8 @@
 
 int main(void) 
 {
-    u32* lfb_base;    
+    u32* lfb_base;
+    uint32_t btn = 0;
 
     config_hw();
     display_enable_backlight(0);
@@ -92,8 +93,7 @@ int main(void)
     ALIGNED(32) unsigned char currentHash[32];
     memcpy(correctPubkeyHash, (void*)get_fuse_chip_regs()->FUSE_PUBLIC_KEY, sizeof(correctPubkeyHash));
 
-    printk("Required BCT PUBKEY SHA256 (usedEntries: %08llx hashPtr: %08x):\n", 
-        usedBctEntries, (uintptr_t)correctPubkeyHash);
+    printk("Required BCT PUBKEY SHA256:\n");
     for (u32 i=0; i<sizeof(correctPubkeyHash); i++) printk("%02X", (u32)correctPubkeyHash[i]);
     printk("\n\n");
 
@@ -121,7 +121,7 @@ int main(void)
     printk("\nPRESS VOL- TO BRICC ALL OR VOL+ TO TRY AND UNBRICC ALL BCT ENTRIES! (Power button to quit)\n");
     for (;;) 
     {
-        uint32_t btn = btn_read();
+        btn = btn_read();
         if ((btn & BTN_POWER) != 0)
             goto progend;
 
@@ -250,11 +250,10 @@ progend:
     mc_disable_ahb_redirect();
     if (bctAlloc != NULL) { free(bctAlloc); bctAlloc = NULL; }
 
-    printk("\nPress the POWER button to turn off the console.\n");
+    printk("\nPress the POWER button to reboot the console back into RCM.\n");
+    while (btn_read() == btn) { sleep(10000); } //wait for them to release previously held button
     while (btn_read() != BTN_POWER) { sleep(10000); }
-
-    // Tell the PMIC to turn everything off
-    shutdown_using_pmic();
+    reboot_into_rcm();
 
     /* Do nothing for now */
     return 0;

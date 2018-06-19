@@ -16,6 +16,8 @@
 
 #include "util.h"
 #include "t210.h"
+#include "pmc.h"
+#include "timer.h"
 #include "max7762x.h"
 #include "max77620.h"
 
@@ -33,9 +35,16 @@ int running_on_bpmp(void)
 	return (*uptag_ptr) == avp_id;
 }
 
-void shutdown_using_pmic()
+void shutdown_using_pmic(void)
 {
     u8 regVal = max77620_recv_byte(MAX77620_REG_ONOFFCNFG1);
     regVal |= MAX77620_ONOFFCNFG1_PWR_OFF;
     max77620_send_byte(MAX77620_REG_ONOFFCNFG1, regVal);
+}
+
+void reboot_into_rcm(void)
+{
+	PMC(APBDEV_PMC_SCRATCH0) = 2; //Reboot into rcm.
+	PMC(0) |= 0x10;
+	while (1) { sleep(1); }
 }
