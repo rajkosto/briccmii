@@ -13,12 +13,14 @@
 #include "hwinit/fuse.h"
 #include "hwinit/se.h"
 #include <string.h>
-#define XVERSION 1
+#define XVERSION 2
 
 #define SECTOR_SIZE (512)
 #define NUM_BCT_ENTRIES (64)
 #define BCT_ENTRY_SIZE_BYTES (0x4000)
 #define BCT_ENTRY_SIZE_SECTORS (BCT_ENTRY_SIZE_BYTES/SECTOR_SIZE)
+#define NUM_KEYBLOBS (32)
+#define KEYBLOB_SIZE (0xB0)
 
 int main(void) 
 {
@@ -47,6 +49,10 @@ int main(void)
     unsigned char* bctSectors = (void*)ALIGN_UP((uintptr_t)bctAlloc, SECTOR_SIZE);
     memset(bctSectors, 0, BCT_ENTRY_SIZE_BYTES * NUM_BCT_ENTRIES);
 
+    unsigned char* kblobAlloc = malloc(SECTOR_SIZE * NUM_KEYBLOBS + SECTOR_SIZE);
+    unsigned char* kblobSectors = (void*)ALIGN_UP((uintptr_t)kblobAlloc, SECTOR_SIZE);
+    memset(kblobSectors, 0, SECTOR_SIZE * NUM_KEYBLOBS);
+
     mc_enable_ahb_redirect();    
     sdmmc_storage_t storage;
     memset(&storage, 0, sizeof(storage));
@@ -64,6 +70,12 @@ int main(void)
     {
         printk("Failed to switch to BOOT0 eMMC partition.\n");
 		goto progend;
+    }
+
+    if (!sdmmc_storage_read(&storage, 0x180000/SECTOR_SIZE, NUM_KEYBLOBS, kblobSectors))
+    {
+        printk("Error reading keyblob data from BOOT0.\n");
+        goto progend;
     }
 
     for (u32 currEntry=0; currEntry<NUM_BCT_ENTRIES; currEntry++)
@@ -90,10 +102,22 @@ int main(void)
     }
 
     uint64_t validBctEntries = 0;
+    uint64_t validBctCustData = 0;
+
     ALIGNED(32) unsigned char correctPubkeyHash[32];
     ALIGNED(32) unsigned char currentHash[32];
     memcpy(correctPubkeyHash, (void*)get_fuse_chip_regs()->FUSE_PUBLIC_KEY, sizeof(correctPubkeyHash));
 
+    uint32_t currFuseCount = 0;
+    uint32_t currFuseBits = fuse_get_reserved_odm(7);
+    for (u32 currBit=0; currBit<32; currBit++)
+    {
+        if (currFuseBits & (1u << currBit))
+            currFuseCount++;
+        else
+            break;
+    }
+    printk("NUMBER OF BURNT ANTI-DOWNGRADE FUSES: %u (raw value: 0x%08X)\n", currFuseCount, currFuseBits);
     printk("Required BCT PUBKEY SHA256:\n");
     for (u32 i=0; i<sizeof(correctPubkeyHash); i++) printk("%02X", (u32)correctPubkeyHash[i]);
     printk("\n\n");
@@ -109,14 +133,36 @@ int main(void)
         const unsigned char* bctEntryData = &bctSectors[currEntry*BCT_ENTRY_SIZE_BYTES];
         memset(currentHash, 0, sizeof(currentHash));
         se_calculate_sha256(currentHash, &bctEntryData[0x210], 0x100);
+        bool pubkeyCorrect = memcmp(currentHash, correctPubkeyHash, sizeof(correctPubkeyHash)) == 0;
+        bool custDataCorrect = false;
+        {
+            uint32_t bctVersion = 0;
+            memcpy(&bctVersion, &bctEntryData[0x2330], sizeof(bctVersion));
+            if (bctVersion > 0 && bctVersion <= NUM_KEYBLOBS)
+            {
+                const unsigned char* wantedKeyblob = &kblobSectors[(bctVersion-1)*SECTOR_SIZE];
+                custDataCorrect = memcmp(&bctEntryData[0x450], wantedKeyblob, KEYBLOB_SIZE) == 0;
+            }
+        }
 
-        if (memcmp(currentHash, correctPubkeyHash, sizeof(correctPubkeyHash)) != 0)
-            printk("INCORRECT!\n");
-        else
+        if (pubkeyCorrect)
         {
             validBctEntries |= wantedMask;
-            printk("CORRECT!\n");
+            printk("PUBKEY CORRECT (NORMAL)!");
         }
+        else
+            printk("PUBKEY INCORRECT (BRICC'D)!");
+
+        printk(" ");
+        if (custDataCorrect)
+        {
+            validBctCustData |= wantedMask;
+            printk("cust_data correct");
+        }
+        else
+            printk("cust_data incorrect");
+
+        printk("\n");
     }
 
     printk("\nPRESS VOL- TO BRICC ALL OR VOL+ TO TRY AND UNBRICC ALL BCT ENTRIES! (Power button to quit)\n");
@@ -194,19 +240,52 @@ int main(void)
                     continue;
 
                 printk("BCT entry %u: ", currEntry);
-                if ((validBctEntries & wantedMask) != 0)
+                bool pubkeyCorrect = (validBctEntries & wantedMask) != 0;
+                bool custDataCorrect = (validBctCustData & wantedMask) != 0;
+                if (pubkeyCorrect && custDataCorrect)
                 {
                     printk("ALREADY CORRECT!\n");
                     continue;
                 }
 
                 unsigned char* bctEntryData = &bctSectors[currEntry*BCT_ENTRY_SIZE_BYTES];
-                memcpy(&bctEntryData[0x210], goodPubkey, sizeof(goodPubkey));
-                
-                if (!sdmmc_storage_write(&storage, currEntry*BCT_ENTRY_SIZE_SECTORS+1, 1, &bctEntryData[SECTOR_SIZE]))
-                    printk("Error writing to BOOT0!\n");
-                else
-                    printk("GOT UN-BRICC'D!\n");
+                if (!custDataCorrect)
+                {
+                    uint32_t bctVersion = 0;
+                    memcpy(&bctVersion, &bctEntryData[0x2330], sizeof(bctVersion));
+                    if (bctVersion > 0 && bctVersion <= NUM_KEYBLOBS)
+                    {
+                        const unsigned char* wantedKeyblob = &kblobSectors[(bctVersion-1)*SECTOR_SIZE];
+                        memcpy(&bctEntryData[0x450], wantedKeyblob, KEYBLOB_SIZE);
+                        if (!sdmmc_storage_write(&storage, currEntry*BCT_ENTRY_SIZE_SECTORS+2, 1, &bctEntryData[SECTOR_SIZE*2]))
+                        {
+                            printk("Error writing cust_data to BOOT0!\n");
+                            continue;
+                        }
+                        else
+                            printk("cust_data corrected");
+                    }
+                    else
+                    {
+                        printk("Invalid version field in BCT!\n");
+                        continue;
+                    }
+                }
+                if (!pubkeyCorrect)
+                {
+                    memcpy(&bctEntryData[0x210], goodPubkey, sizeof(goodPubkey));
+                    if (!custDataCorrect)
+                        printk(", ");
+
+                    if (!sdmmc_storage_write(&storage, currEntry*BCT_ENTRY_SIZE_SECTORS+1, 1, &bctEntryData[SECTOR_SIZE]))
+                    {
+                        printk("Error writing pubkey to BOOT0!\n");
+                        continue;
+                    }
+                    else
+                        printk("GOT UN-BRICC'D!");
+                }
+                printk("\n");
             }
             break;
         } 
@@ -249,6 +328,7 @@ progend:
         sdmmc_storage_end(&storage, 0);
 
     mc_disable_ahb_redirect();
+    if (kblobAlloc != NULL) { free(kblobAlloc); kblobAlloc = NULL; }
     if (bctAlloc != NULL) { free(bctAlloc); bctAlloc = NULL; }
 
     printk("\nPress the POWER button to reboot the console back into RCM.\n");
