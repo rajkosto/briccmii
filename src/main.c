@@ -17,7 +17,8 @@
 
 #define SECTOR_SIZE (512)
 #define NUM_BCT_ENTRIES (64)
-#define BCT_ENTRY_SIZE_SECTORS (0x4000/SECTOR_SIZE)
+#define BCT_ENTRY_SIZE_BYTES (0x4000)
+#define BCT_ENTRY_SIZE_SECTORS (BCT_ENTRY_SIZE_BYTES/SECTOR_SIZE)
 
 int main(void) 
 {
@@ -42,9 +43,9 @@ int main(void)
     /* to avoid flickering. */
     display_enable_backlight(1);
 
-    unsigned char* bctAlloc = malloc(SECTOR_SIZE * NUM_BCT_ENTRIES + SECTOR_SIZE);
+    unsigned char* bctAlloc = malloc(BCT_ENTRY_SIZE_BYTES * NUM_BCT_ENTRIES + SECTOR_SIZE);
     unsigned char* bctSectors = (void*)ALIGN_UP((uintptr_t)bctAlloc, SECTOR_SIZE);
-    memset(bctSectors, 0, SECTOR_SIZE * NUM_BCT_ENTRIES);
+    memset(bctSectors, 0, BCT_ENTRY_SIZE_BYTES * NUM_BCT_ENTRIES);
 
     mc_enable_ahb_redirect();    
     sdmmc_storage_t storage;
@@ -67,7 +68,7 @@ int main(void)
 
     for (u32 currEntry=0; currEntry<NUM_BCT_ENTRIES; currEntry++)
     {
-        if (!sdmmc_storage_read(&storage, currEntry*BCT_ENTRY_SIZE_SECTORS+1, 1, &bctSectors[currEntry*SECTOR_SIZE]))
+        if (!sdmmc_storage_read(&storage, currEntry*BCT_ENTRY_SIZE_SECTORS, BCT_ENTRY_SIZE_SECTORS, &bctSectors[currEntry*BCT_ENTRY_SIZE_BYTES]))
         {
             printk("Error reading BCT entry %u, exiting.\n", currEntry);
             goto progend;
@@ -77,8 +78,8 @@ int main(void)
     uint64_t usedBctEntries = 0;
     for (u32 currEntry=0; currEntry<NUM_BCT_ENTRIES; currEntry++)
     {
-        const unsigned char* bctSigData = &bctSectors[currEntry*SECTOR_SIZE];
-        for (u32 currByte=0; currByte<SECTOR_SIZE; currByte++)
+        const unsigned char* bctSigData = &bctSectors[currEntry*BCT_ENTRY_SIZE_BYTES + 0x210];
+        for (u32 currByte=0; currByte<0x210; currByte++)
         {
             if (bctSigData[currByte] != 0)
             {
@@ -105,9 +106,9 @@ int main(void)
 
         printk("BCT entry %u: ", currEntry);
 
-        const unsigned char* bctSigData = &bctSectors[currEntry*SECTOR_SIZE];
+        const unsigned char* bctEntryData = &bctSectors[currEntry*BCT_ENTRY_SIZE_BYTES];
         memset(currentHash, 0, sizeof(currentHash));
-        se_calculate_sha256(currentHash, &bctSigData[0x10], 0x100);
+        se_calculate_sha256(currentHash, &bctEntryData[0x210], 0x100);
 
         if (memcmp(currentHash, correctPubkeyHash, sizeof(correctPubkeyHash)) != 0)
             printk("INCORRECT!\n");
@@ -139,8 +140,8 @@ int main(void)
                     if ((validBctEntries & wantedMask) == 0)
                         continue;
 
-                    const unsigned char* bctSigData = &bctSectors[currEntry*SECTOR_SIZE];
-                    memcpy(goodPubkey, &bctSigData[0x10], sizeof(goodPubkey));
+                    const unsigned char* bctEntryData = &bctSectors[currEntry*BCT_ENTRY_SIZE_BYTES];
+                    memcpy(goodPubkey, &bctEntryData[0x210], sizeof(goodPubkey));
                     printk("Using correct one from BCT entry %u\n", currEntry);
                     break;
                 }
@@ -153,8 +154,8 @@ int main(void)
                     if ((usedBctEntries & wantedMask) == 0)
                         continue;
 
-                    const unsigned char* bctSigData = &bctSectors[currEntry*SECTOR_SIZE];
-                    memcpy(goodPubkey, &bctSigData[0x10], sizeof(goodPubkey));
+                    const unsigned char* bctEntryData = &bctSectors[currEntry*BCT_ENTRY_SIZE_BYTES];
+                    memcpy(goodPubkey, &bctEntryData[0x210], sizeof(goodPubkey));
 
                     bool foundGoodKey = false;
                     memset(currentHash, 0, sizeof(currentHash));                    
@@ -199,10 +200,10 @@ int main(void)
                     continue;
                 }
 
-                unsigned char* bctSigData = &bctSectors[currEntry*SECTOR_SIZE];
-                memcpy(&bctSigData[0x10], goodPubkey, sizeof(goodPubkey));
+                unsigned char* bctEntryData = &bctSectors[currEntry*BCT_ENTRY_SIZE_BYTES];
+                memcpy(&bctEntryData[0x210], goodPubkey, sizeof(goodPubkey));
                 
-                if (!sdmmc_storage_write(&storage, currEntry*BCT_ENTRY_SIZE_SECTORS+1, 1, bctSigData))
+                if (!sdmmc_storage_write(&storage, currEntry*BCT_ENTRY_SIZE_SECTORS+1, 1, &bctEntryData[SECTOR_SIZE]))
                     printk("Error writing to BOOT0!\n");
                 else
                     printk("GOT UN-BRICC'D!\n");
@@ -224,16 +225,16 @@ int main(void)
                     continue;
                 }
 
-                unsigned char* bctSigData = &bctSectors[currEntry*SECTOR_SIZE];
+                unsigned char* bctEntryData = &bctSectors[currEntry*BCT_ENTRY_SIZE_BYTES];
                 memcpy(currentHash, correctPubkeyHash, sizeof(currentHash));
                 //make SURE it doesnt match
                 while (memcmp(currentHash, correctPubkeyHash, sizeof(correctPubkeyHash)) == 0) 
                 {
-                    bctSigData[0x10] ^= get_tmr() & 0xFF; 
-                    se_calculate_sha256(currentHash, &bctSigData[0x10], 0x100);
+                    bctEntryData[0x210] ^= get_tmr() & 0xFF; 
+                    se_calculate_sha256(currentHash, &bctEntryData[0x210], 0x100);
                 }
                 
-                if (!sdmmc_storage_write(&storage, currEntry*BCT_ENTRY_SIZE_SECTORS+1, 1, bctSigData))
+                if (!sdmmc_storage_write(&storage, currEntry*BCT_ENTRY_SIZE_SECTORS+1, 1, &bctEntryData[SECTOR_SIZE]))
                     printk("Error writing to BOOT0!\n");
                 else
                     printk("GOT BRICC'D!\n");
